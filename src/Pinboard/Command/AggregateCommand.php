@@ -154,29 +154,16 @@ class AggregateCommand extends Command
 
             return;
         }
+        $lockFileExists = file_exists(__FILE__.'.lock');
 
-        if(file_exists( __FILE__ . '.lock')) {
-            $output->writeln('<error>Cannot run data aggregation: the another instance of this script is already executing. Otherwise, remove ' . __FILE__ . '.lock file</error>');
-
-            if ($this->mailer && isset($this->params['notification']['global_email'])) {
-                $body = $this->app['twig']->render('lock_notification.html.twig');
-
-                $message = \Swift_Message::newInstance()
-                    ->setSubject('Intaro Pinboard can\'t run data aggregation')
-                    ->setContentType('text/html')
-                    ->setFrom(isset($this->params['notification']['sender']) ? $this->params['notification']['sender'] : 'noreply@pinboard')
-                    ->setTo($this->params['notification']['global_email'])
-                    ->setBody($body);
-                    ;
-
-                $this->sendEmail($message);
-            }
-
+        $lockFileHandler = fopen(__FILE__.'.lock', 'wb');
+        if (false === flock($lockFileHandler, LOCK_EX | LOCK_NB)) {
+            $output->writeln('<error>Runs parallel to another \Pinboard\Command\AggregateCommand::execute. </error>');
             return;
         }
-
-        if(!touch( __FILE__ . '.lock')) {
-            $output->writeln('<error>Warning: cannot create ' . __FILE__ . '.lock file</error>');
+        if($lockFileExists) {
+            $output->writeln('<error>Previous startup  \Pinboard\Command\AggregateCommand::execute  failed. Otherwise, delete ' . __FILE__ . '.lock file</error>');
+            return;
         }
 
         $now = new \DateTime();
@@ -596,6 +583,11 @@ class AggregateCommand extends Command
         $this->sendBorderOutEmails($values);
 
         $output->writeln('<info>Data are aggregated successfully</info>');
+
+
+        //Unblock lock file
+        flock($lockFileHandler, LOCK_UN);
+        fclose($lockFileHandler);
 
         if (!unlink( __FILE__ . '.lock')) {
             $output->writeln('<error>Error: cannot remove ' . __FILE__ . '.lock file, you must remove it manually and check server settings.</error>');
